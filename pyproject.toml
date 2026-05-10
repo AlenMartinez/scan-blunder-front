@@ -1,0 +1,11 @@
+[project]
+name = "scan-blunder-moder-front"
+version = "0.1.0"
+description = "Scanner library front-end"
+requires-python = ">=3.10"
+
+dependencies = [
+    "requests==2.31.0",
+    "beautifulsoup4==4.12.3",
+    "rich",
+]
