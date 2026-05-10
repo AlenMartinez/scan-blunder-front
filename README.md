@@ -1,5 +1,8 @@
 # Scan Blunder Front
 
+![Scan Blunder Front Banner](screenshot/Captura%20desde%202026-05-10%2013-47-47.png)
+
+
 **Scan Blunder Front** es un potente scanner de seguridad para aplicaciones frontend (React, Next.js, Vue, WordPress, etc.). Está diseñado para detectar de forma automática tokens expuestos, secretos, malas prácticas de desarrollo y vulnerabilidades en archivos JavaScript.
 
 ## Caracteristicas
