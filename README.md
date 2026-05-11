@@ -18,7 +18,7 @@
 
 1. **Clonar el repositorio**:
    ```bash
-   git clone <tu-repositorio>
+   git clone https://github.com/AlenMartinez/scan-blunder-front.git
    cd scan-blunder-front
    ```
 
