@@ -11,5 +11,6 @@ def url_validator(url):
         re.IGNORECASE,
     )
     if not re.match(regex, url):
+        print(f'{"".join("=" for _ in range(100))}')
         raise argparse.ArgumentTypeError("Invalid URL")
     return url
