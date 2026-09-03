@@ -1,8 +1,10 @@
 from scanner.core.patterns import LIB_PATTERNS, PATTERNS, VULNERABILITY_PATTERNS, URL_PATTERN, HTTP_METHOD_PATTERN
 import re
+from scanner.core.findings.writer import create_finding_file
 
 class Detector:
-    def __init__(self):
+    def __init__(self, domain):
+        self.domain = domain
         self.found_libs = {}
         self.found_secrets = []
         self.found_vulnerabilities = []
@@ -22,23 +24,32 @@ class Detector:
         for name, pattern in PATTERNS.items():
             matches = re.finditer(pattern, content)
             for match in matches:
+                start = max(0, match.start() - 150)
+                end = min(len(content), match.end() + 150)
+                context = content[start:end]
+
                 value = match.group(0)
                 self.found_secrets.append({
                     "type": name,
                     "value": value,
                     "url": url,
-                    "line": content.count("\n", 0, match.start()) + 1
+                    "line": content.count("\n", 0, match.start()) + 1,
+                    "context": context
                 })
 
         # 3. Detect Vulnerabilities (SQL in front, etc)
         for name, pattern in VULNERABILITY_PATTERNS.items():
             matches = re.finditer(pattern, content)
             for match in matches:
+                start = max(0, match.start() - 150)
+                end = min(len(content), match.end() + 150)
+                context = content[start:end]
                 self.found_vulnerabilities.append({
                     "type": name,
                     "value": match.group(0),
                     "url": url,
-                    "line": content.count("\n", 0, match.start()) + 1
+                    "line": content.count("\n", 0, match.start()) + 1,
+                    "context": context
                 })
 
         # 4. Extract URLs
@@ -55,7 +66,21 @@ class Detector:
                 "source": url
             })
 
+
+        
+
     def get_results(self):
+        import json
+        finding_file = create_finding_file(self.domain)
+        with open(finding_file, "w", encoding="utf-8") as f:
+            f.write(json.dumps({
+                "libs": self.found_libs,
+                "secrets": self.found_secrets,
+                "vulnerabilities": self.found_vulnerabilities,
+                "urls": list(self.found_urls),
+                "methods": self.found_methods,
+            }, indent=4))
+
         return {
             "libs": self.found_libs,
             "secrets": self.found_secrets,

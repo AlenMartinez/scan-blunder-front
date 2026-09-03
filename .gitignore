@@ -38,3 +38,6 @@ lib/
 # OS
 .DS_Store
 Thumbs.db
+
+# findings
+findings/*

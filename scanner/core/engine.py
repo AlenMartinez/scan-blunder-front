@@ -11,7 +11,7 @@ class ScannerEngine:
         self.max_threads = max_threads
         self.visited_urls = set()
         self.js_queue = set()
-        self.detector = Detector()
+        self.detector = Detector(self.domain)
         self.http_client = HttpClient()
 
     def process_url(self, url):
