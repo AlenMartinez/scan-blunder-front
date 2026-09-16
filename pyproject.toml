@@ -1,14 +1,17 @@
 [project]
-name = "scan-blunder-moder-front"
-version = "0.1.0"
-description = "Scanner library front-end"
+name = "scan-blunder-front"
+version = "0.2.0"
+description = "Front-end security scanner: secrets, client-side SQL, access control, endpoints and stack fingerprinting"
 requires-python = ">=3.8"
 
 dependencies = [
-    "requests==2.31.0",
-    "beautifulsoup4==4.12.3",
-    "rich",
+    "requests>=2.31.0",
+    "beautifulsoup4>=4.12.3",
+    "rich>=13.7.0",
 ]
+
+[project.scripts]
+scan-blunder-front = "scanner.cli.commands:main"
 
 [tool.setuptools.packages.find]
 include = ["scanner*"]
