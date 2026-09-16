@@ -8,7 +8,9 @@ from scanner.core.detector.base import BaseDetector, redact
 from scanner.core.filters import (
     decode_jwt,
     is_hash_like,
+    is_human_text,
     is_placeholder,
+    is_route_like,
     is_vendor_bundle,
     looks_random,
     shannon_entropy,
@@ -16,7 +18,6 @@ from scanner.core.filters import (
 from scanner.core.lexer import iter_string_literals, preceding_identifier
 from scanner.core.models import Asset, Category, Confidence, Finding, Severity
 from scanner.core.patterns.secrets import (
-    GENERIC_ASSIGNMENT_RE,
     GENERIC_MIN_ENTROPY,
     GENERIC_MIN_LENGTH,
     HIGH_SIGNAL_RULES,
@@ -179,20 +180,30 @@ class SecretDetector(BaseDetector):
     ) -> List[Finding]:
         """`apiKey: "…"` style hits, filtered hard.
 
-        Order matters here. The cheap, decisive checks (denylisted key,
-        placeholder value, too short) run before the expensive entropy maths, and
-        every one of them drops the finding outright rather than downgrading it.
+        The candidate value comes from the JS tokenizer, never from a raw regex.
+        A regex that starts matching at an arbitrary offset can pair an opening
+        quote with the closing quote of a *different* string, which is how a
+        minified parser`s `token=` once yielded a 400-character slab of code as
+        "high entropy key material". The tokenizer reads from the start of the
+        file, so its quote pairing is correct by construction.
+
+        Order matters below: the cheap, decisive checks run before the entropy
+        maths, and each one drops the finding outright rather than downgrading it.
         """
         findings: List[Finding] = []
         if vendor:
             return findings
 
-        for match in GENERIC_ASSIGNMENT_RE.finditer(source):
-            key = match.group("key")
-            value = match.group("value")
-            if not key or not value:
+        for literal in iter_string_literals(source, base_offset=offset):
+            value = literal.value
+            if len(value) < GENERIC_MIN_LENGTH or len(value) > 512:
+                continue
+            if "\n" in value or "\r" in value:
                 continue
 
+            key = preceding_identifier(source, literal.start - offset)
+            if not key:
+                continue
             leaf_key = key.split(".")[-1]
             if leaf_key.lower() in NON_SECRET_KEYS:
                 continue
@@ -200,34 +211,35 @@ class SecretDetector(BaseDetector):
                 continue
             if is_placeholder(value, key=leaf_key):
                 continue
-            if len(value) < GENERIC_MIN_LENGTH:
+
+            # A UI string is never a credential: `required_password` holding
+            # "La contraseña es obligatoria" is an i18n message, not a secret.
+            if is_human_text(value):
+                continue
+            # `user/change_password` is an API route constant, not a password.
+            if is_route_like(value):
                 continue
             if is_hash_like(value):
                 continue
+
             # A URL as the value of `database_url` matters; as the value of
-            # `token` it is a config endpoint, not a credential. JSON embedded in
-            # a bundle escapes its slashes (`https:\/\/host`), so unescape first
-            # or every such URL sails through as high-entropy "key material".
-            unescaped = value.replace("\\/", "/")
-            if re.match(r"(?i)^(?:https?|wss?|ftp)://", unescaped) and "url" not in leaf_key.lower():
+            # `token` it is a config endpoint, not a credential.
+            if re.match(r"(?i)^(?:https?|wss?|ftp)://", value) and "url" not in leaf_key.lower():
                 continue
-            if unescaped.startswith(("/", "./", "../")):
+            if value.startswith(("/", "./", "../")):
+                continue
+            # Anything carrying JS syntax came from a malformed capture.
+            if _CODE_FRAGMENT.search(value):
                 continue
 
             entropy = shannon_entropy(value)
-            random_looking = looks_random(value, GENERIC_MIN_LENGTH, GENERIC_MIN_ENTROPY)
-
-            if random_looking:
-                confidence = Confidence.FIRM
-                severity = Severity.HIGH
+            if looks_random(value, GENERIC_MIN_LENGTH, GENERIC_MIN_ENTROPY):
+                confidence, severity = Confidence.FIRM, Severity.HIGH
             elif entropy >= 2.8 and len(value) >= 16:
-                confidence = Confidence.TENTATIVE
-                severity = Severity.MEDIUM
+                confidence, severity = Confidence.TENTATIVE, Severity.MEDIUM
             else:
                 continue
 
-            start = offset + match.start("value")
-            end = offset + match.end("value")
             findings.append(
                 self.finding(
                     asset=asset,
@@ -235,8 +247,8 @@ class SecretDetector(BaseDetector):
                     title="Hardcoded credential ({})".format(leaf_key),
                     severity=severity,
                     confidence=confidence,
-                    start=start,
-                    end=end,
+                    start=literal.start,
+                    end=literal.end,
                     value=redact(value),
                     detail=(
                         "A value assigned to `{}` has {:.1f} bits/char of entropy, "
@@ -251,3 +263,7 @@ class SecretDetector(BaseDetector):
                 )
             )
         return findings
+
+
+#: Syntax that only appears when a "value" is really a slice of source code.
+_CODE_FRAGMENT = re.compile(r"[{};]\s*(?:case|return|function|var|let|const)\b|\)\s*[;{]|=>\s*[{(]")

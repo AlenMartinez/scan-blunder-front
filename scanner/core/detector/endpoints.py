@@ -6,7 +6,8 @@ from typing import Iterable, List, Optional, Set, Tuple
 from urllib.parse import urljoin, urlparse
 
 from scanner.core.detector.base import BaseDetector
-from scanner.core.lexer import iter_string_literals
+from scanner.core.filters import is_mime_type, is_route_like
+from scanner.core.lexer import iter_string_literals, preceding_identifier
 from scanner.core.models import (
     Asset,
     Category,
@@ -108,12 +109,18 @@ class EndpointDetector(BaseDetector):
                 self._record_call(asset, results, match.group(2), match.group(1).upper())
 
             # Bare API-looking paths inside string literals.
+            relative_routes: List[str] = []
             for literal in iter_string_literals(source, base_offset=offset):
                 value = literal.value.strip()
-                if not value.startswith("/") or len(value) > 200:
+                if len(value) > 200:
                     continue
-                if API_PATH_RE.match(value) or GENERIC_API_PATH_RE.match(value):
-                    self._record_call(asset, results, value, "GET", inferred=True)
+                if value.startswith("/"):
+                    if API_PATH_RE.match(value) or GENERIC_API_PATH_RE.match(value):
+                        self._record_call(asset, results, value, "GET", inferred=True)
+                elif self._is_route_constant(source, literal, offset, value):
+                    relative_routes.append(value)
+
+            self._record_route_table(asset, results, relative_routes)
 
     def _record_call(self, asset: Asset, results, raw_url: str, verb: str,
                      inferred: bool = False) -> None:
@@ -127,7 +134,7 @@ class EndpointDetector(BaseDetector):
         elif raw_url.startswith("//"):
             url = "https:" + raw_url
         elif raw_url.startswith("/"):
-            url = urljoin(self.context.base_url, raw_url)
+            url = self._resolve_path(asset, raw_url)
         else:
             return  # relative fragments without context are too noisy to resolve
 
@@ -143,6 +150,46 @@ class EndpointDetector(BaseDetector):
                      source=asset.url, scope=self._scope(url), inferred=inferred)
         )
         results.urls.setdefault(url, self._scope(url))
+
+    @staticmethod
+    def _is_route_constant(source: str, literal, offset: int, value: str) -> bool:
+        """`t.reset_password = "user/reset_password"` -- an API route constant.
+
+        These read like credentials to a naive scanner (the key ends in
+        "password") but they are the application's route map, which is exactly
+        what an endpoint inventory wants.
+        """
+        if not is_route_like(value) or is_mime_type(value):
+            return False
+        if value.count("/") > 4 or "." in value.split("/")[-1]:
+            return False  # a file path, not a route
+
+        segments = value.split("/")
+        # Design tokens read like routes: `bg.emphasized/60`, `blue.500/40`.
+        # A namespaced first segment or a bare numeric segment is a style value,
+        # not an HTTP path.
+        if "." in segments[0]:
+            return False
+        if any(segment.isdigit() for segment in segments):
+            return False
+        return bool(preceding_identifier(source, literal.start - offset))
+
+    def _record_route_table(self, asset: Asset, results, routes: List[str]) -> None:
+        """Only trust these in bulk: three or more in one file is a route table."""
+        unique = sorted(set(routes))
+        if len(unique) < 3:
+            return
+        for route in unique[:200]:
+            results.add_endpoint(
+                Endpoint(
+                    url=route,
+                    method="GET",
+                    kind="api",
+                    source=asset.url,
+                    scope="relative",
+                    inferred=True,
+                )
+            )
 
     def _routes(self, asset: Asset, results) -> None:
         """Client-side router tables describe the whole page map of an SPA."""
@@ -166,6 +213,18 @@ class EndpointDetector(BaseDetector):
                 results.emails.append(email)
 
     # -- helpers ---------------------------------------------------------------- #
+    def _resolve_path(self, asset: Asset, path: str) -> str:
+        """Turn an absolute path into a URL, honouring an API namespace root.
+
+        The WordPress REST index at /wp-json/ lists its routes as "/wp/v2/users".
+        `urljoin` would resolve that against the site root and produce
+        /wp/v2/users, which 404s -- the routes only exist under /wp-json.
+        """
+        parsed = urlparse(asset.url)
+        if "/wp-json" in parsed.path and not path.startswith("/wp-json"):
+            return "{}://{}/wp-json{}".format(parsed.scheme, parsed.netloc, path)
+        return urljoin(self.context.base_url, path)
+
     def _scope(self, url: str) -> str:
         host = (urlparse(url).hostname or "").lower()
         base = self.context.domain.lower()

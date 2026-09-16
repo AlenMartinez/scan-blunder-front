@@ -113,8 +113,27 @@ def shannon_entropy(value: str) -> float:
     return -sum((c / length) * math.log2(c / length) for c in counts.values())
 
 
-_WORDY = re.compile(r"^[A-Za-z]+(?:[\s_\-][A-Za-z]+)*$")
-_SENTENCE = re.compile(r"[A-Za-z]{2,}\s+[A-Za-z]{2,}\s+[A-Za-z]{2,}")
+#: `[^\W\d_]` is "any unicode letter". Using [A-Za-z] here meant that
+#: "La contrase\u00f1a es obligatoria" did not read as a sentence, and an i18n
+#: validation message was reported as a hardcoded credential.
+_LETTER = r"[^\W\d_]"
+_WORDY = re.compile(r"^{L}+(?:[\s_\-]{L}+)*$".format(L=_LETTER))
+_SENTENCE = re.compile(r"{L}{{2,}}\s+{L}{{2,}}\s+{L}{{2,}}".format(L=_LETTER))
+
+#: Three or more letter-words in a row: a phrase, never key material.
+_WORD_RUN = re.compile(r"{L}{{2,}}(?:[\s'\u2019]{L}{{2,}}){{2,}}".format(L=_LETTER))
+
+#: `user/change_password`, `api/v1/orders` -- a route constant. Every segment is
+#: a lowercase identifier, which is what separates it from base64 key material
+#: such as `Xq7Rv2Np/9Lm4Kd8`.
+_ROUTE_LIKE = re.compile(
+    r"^[a-z][a-z0-9_.\-]*(?:/(?:[a-z0-9_.\-]+|\{[^}]{1,40}\}|:[a-z]\w*))+/?$"
+)
+
+#: MIME types look exactly like two-segment routes.
+_MIME_LIKE = re.compile(
+    r"^(?:application|audio|font|image|message|model|multipart|text|video)/[\w.+\-]+$"
+)
 
 
 def charset_classes(value: str) -> int:
@@ -131,14 +150,47 @@ def charset_classes(value: str) -> int:
     return classes
 
 
+def is_human_text(value: str) -> bool:
+    """True when the value reads as a human phrase (a UI string, an i18n message).
+
+    A sentence is never a credential, so this is a hard drop rather than a
+    confidence downgrade.
+    """
+    stripped = value.strip()
+    if not stripped or " " not in stripped:
+        return False
+    if _WORD_RUN.search(stripped):
+        return True
+    words = re.findall(_LETTER + r"{2,}", stripped)
+    if len(words) >= 2 and any(w.lower() in COMMON_WORDS for w in words):
+        return True
+    return False
+
+
+def is_route_like(value: str) -> bool:
+    """True for path/route constants such as `user/change_password`."""
+    stripped = value.strip()
+    if not stripped or "/" not in stripped:
+        return False
+    if _MIME_LIKE.match(stripped):
+        return True
+    return bool(_ROUTE_LIKE.match(stripped))
+
+
+def is_mime_type(value: str) -> bool:
+    return bool(_MIME_LIKE.match(value.strip()))
+
+
 def looks_random(value: str, min_length: int = 12, min_entropy: float = 3.0) -> bool:
     """Heuristic: does this look like generated key material?"""
     stripped = value.strip()
     if len(stripped) < min_length:
         return False
-    if _SENTENCE.search(stripped):
+    if _SENTENCE.search(stripped) or is_human_text(stripped):
         return False
     if _WORDY.match(stripped) and len(stripped) < 32:
+        return False
+    if is_route_like(stripped):
         return False
     return shannon_entropy(stripped) >= min_entropy and charset_classes(stripped) >= 2
 

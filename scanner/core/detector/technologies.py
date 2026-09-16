@@ -74,7 +74,10 @@ class TechnologyDetector(BaseDetector):
 
     # -- sources -------------------------------------------------------------- #
     def _from_headers(self, asset: Asset, results, findings: List[Finding]) -> None:
-        if not asset.headers:
+        # Only the target's own responses describe the target's stack. Reading
+        # the `Server:` header of a Google or Cloudflare asset is how "Google Tag
+        # Manager" and "ESF" ended up listed as the site's web server.
+        if not asset.headers or not self._is_own_origin(asset.url):
             return
         lowered = {k.lower(): v for k, v in asset.headers.items()}
 
@@ -123,6 +126,16 @@ class TechnologyDetector(BaseDetector):
                 results.add_technology(
                     Technology(name, "", category, "cookie fingerprint", asset.url)
                 )
+
+    def _is_own_origin(self, url: str) -> bool:
+        host = (urlparse(url).hostname or "").lower()
+        base = (self.context.domain or "").lower()
+        if not host or not base:
+            return False
+        if host == base:
+            return True
+        registrable = ".".join(base.split(".")[-2:]) if base.count(".") >= 1 else base
+        return host == registrable or host.endswith("." + registrable)
 
     def _from_content(self, asset: Asset, results) -> None:
         # Cap the scanned window: fingerprints live near the top of a bundle and
@@ -180,19 +193,20 @@ class TechnologyDetector(BaseDetector):
             )
 
     def _wordpress(self, asset: Asset, results, findings: List[Finding]) -> None:
+        """Record every plugin/theme seen. The report is emitted once, at the end.
+
+        Emitting per asset produced one "themes enumerated" finding per file,
+        each listing a different subset.
+        """
         if "/wp-content/" not in asset.content and "/wp-includes/" not in asset.content:
             return
 
         for regex, kind in ((WP_PLUGIN_RE, "plugin"), (WP_THEME_RE, "theme")):
-            seen: Dict[str, str] = {}
             for match in regex.finditer(asset.content):
                 slug = match.group(1)
-                if slug in seen:
-                    continue
                 tail = asset.content[match.end(): match.end() + 60]
                 version_match = ASSET_VERSION_RE.search(match.group(0) + tail)
                 version = version_match.group(1) if version_match else ""
-                seen[slug] = version
                 results.add_technology(
                     Technology(
                         "WordPress {}: {}".format(kind, slug),
@@ -203,35 +217,49 @@ class TechnologyDetector(BaseDetector):
                     )
                 )
 
-            if seen:
-                versioned = {k: v for k, v in seen.items() if v}
-                findings.append(
-                    self.finding(
-                        asset=asset,
-                        category=Category.EXPOSURE,
-                        title="WordPress {}s enumerated".format(kind),
-                        severity=Severity.LOW if not versioned else Severity.MEDIUM,
-                        confidence=Confidence.CONFIRMED,
-                        start=0,
-                        end=0,
-                        value=", ".join(
-                            "{}{}".format(k, " " + v if v else "") for k, v in list(seen.items())[:15]
-                        ),
-                        detail=(
-                            "{} {}(s) are identifiable from asset paths{}. Plugin versions are "
-                            "the usual way a WordPress site gets compromised.".format(
-                                len(seen), kind,
-                                ", {} of them with an exact version".format(len(versioned))
-                                if versioned else "",
-                            )
-                        ),
-                        remediation=(
-                            "Remove `?ver=` query strings from enqueued assets and keep every "
-                            "plugin updated."
-                        ),
-                        tags=["wordpress", "recon"],
-                    )
+    def _wordpress_summary(self, asset: Asset) -> List[Finding]:
+        findings: List[Finding] = []
+        for kind in ("plugin", "theme"):
+            category = "wordpress-{}".format(kind)
+            entries = {
+                tech.name.split(": ", 1)[-1]: tech.version
+                for tech in self.context.results.technologies.values()
+                if tech.category == category
+            }
+            if not entries:
+                continue
+            versioned = {k: v for k, v in entries.items() if v}
+            findings.append(
+                self.finding(
+                    asset=asset,
+                    category=Category.EXPOSURE,
+                    title="WordPress {}s enumerated".format(kind),
+                    severity=Severity.MEDIUM if versioned else Severity.LOW,
+                    confidence=Confidence.CONFIRMED,
+                    start=0,
+                    end=0,
+                    value=", ".join(
+                        "{}{}".format(k, " " + v if v else "")
+                        for k, v in sorted(entries.items())[:20]
+                    ),
+                    detail=(
+                        "{} {}(s) are identifiable from asset paths{}. Outdated "
+                        "extensions are the usual way a WordPress site gets "
+                        "compromised.".format(
+                            len(entries), kind,
+                            ", {} of them with an exact version".format(len(versioned))
+                            if versioned else "",
+                        )
+                    ),
+                    remediation=(
+                        "Remove `?ver=` query strings from enqueued assets and keep every "
+                        "{} updated.".format(kind)
+                    ),
+                    evidence={"detected": ", ".join(sorted(entries))},
+                    tags=["wordpress", "recon"],
                 )
+            )
+        return findings
 
     def _next_data(self, asset: Asset, results, findings: List[Finding]) -> None:
         """__NEXT_DATA__ regularly carries server-side props that leak config."""
@@ -300,7 +328,7 @@ class TechnologyDetector(BaseDetector):
     # -- post-processing ------------------------------------------------------ #
     def check_outdated(self, asset: Asset) -> List[Finding]:
         """Run once at the end, over the aggregated technology list."""
-        findings: List[Finding] = []
+        findings: List[Finding] = self._wordpress_summary(asset)
         for name, minimum, severity, detail in _OUTDATED_RULES:
             tech = self.context.results.technologies.get(name)
             if tech is None or not tech.version:

@@ -2,54 +2,94 @@
 
 ![Scan Blunder Front Banner](screenshot/Captura%20desde%202026-05-10%2013-47-47.png)
 
-**Scan Blunder Front** es un scanner de seguridad para aplicaciones frontend
-(React, Next.js, Vue, Nuxt, Angular, Svelte, WordPress, Laravel, sitios
-estáticos…). Descarga la página, recorre todo su bundle y reporta secretos
-expuestos, SQL en el cliente, lógica de autorización en el navegador, los
-backends con los que habla y el stack completo con versiones.
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python 3.8+](https://img.shields.io/badge/python-3.8%2B-blue.svg)](https://www.python.org/downloads/)
+[![Tests](https://img.shields.io/badge/tests-75%20passing-brightgreen.svg)](tests/)
 
-El objetivo de diseño es **no reportar ruido**: cada hallazgo pasa por una
-cadena de filtros antes de llegar al informe.
+**Scan Blunder Front** is a security scanner for front-end applications
+(React, Next.js, Vue, Nuxt, Angular, Svelte, WordPress, Laravel, static sites…).
+It fetches the page, walks its entire bundle, and reports exposed secrets,
+client-side SQL, authorization logic running in the browser, the backends the
+app talks to, and the full stack with versions.
 
-## Qué detecta
+The design goal is **not reporting noise**: every finding passes through a
+filter chain before it reaches the report.
 
-| Área | Ejemplos |
+## What it detects
+
+| Area | Examples |
 |---|---|
-| **Secretos** | AWS, Google, Stripe, GitHub, GitLab, Slack, SendGrid, Twilio, OpenAI, Anthropic, npm, Firebase, Supabase, claves PEM, cadenas de conexión a BD, JWT (se decodifican y se leen sus claims) |
-| **SQL en el front** | `SELECT/INSERT/UPDATE/DELETE` reales, con distinción entre SQL crudo y SQL **concatenado** (inyectable), más ORMs en el cliente (Prisma, Knex, Sequelize, TypeORM, Mongoose) |
-| **Roles y permisos** | catálogos de roles, permisos granulares (`invoice.delete`), chequeos client-side (`hasRole`, `can`), flags de bypass (`skipAuth`), roles privilegiados dentro de JWTs |
-| **Endpoints y backends** | rutas de API con su método HTTP real, GraphQL, WebSockets, rutas del router SPA, y el listado de hosts backend |
-| **Tecnologías y versiones** | frameworks, librerías, bundlers, CMS, servidor y CDN — por headers, cookies, banners, nombres de archivo y `?ver=`; enumera **plugins y temas de WordPress con su versión** |
-| **Servicios de terceros** | analytics, pagos, identidad, monitoreo, CDNs, soporte |
-| **Vulnerabilidades del cliente** | sinks de DOM XSS (con detección de taint), open redirect, TLS deshabilitado, CORS permisivo, credenciales en `localStorage`, `Math.random()` para valores de seguridad, hosts internos, entornos de staging |
-| **Exposición** | source maps publicados, `serverRuntimeConfig` de Next.js, variables de entorno en `__NEXT_DATA__`, versiones en headers, rutas sensibles (`/.env`, `/.git/config`, `/actuator/env`…) |
-| **Headers** | CSP (y su calidad), HSTS, X-Frame-Options, CORS peligroso, cookies sin `HttpOnly`/`Secure`/`SameSite` |
+| **Secrets** | AWS, Google, Stripe, GitHub, GitLab, Slack, SendGrid, Twilio, OpenAI, Anthropic, npm, Firebase, Supabase, PEM keys, database connection strings, JWTs (decoded, with their claims read) |
+| **SQL in the front-end** | real `SELECT/INSERT/UPDATE/DELETE`, distinguishing raw SQL from **concatenated** (injectable) SQL, plus client-side ORMs (Prisma, Knex, Sequelize, TypeORM, Mongoose) |
+| **Roles and permissions** | role catalogues, granular permissions (`invoice.delete`), client-side checks (`hasRole`, `can`), bypass flags (`skipAuth`), privileged roles inside JWTs |
+| **Endpoints and backends** | API routes with their real HTTP method, GraphQL, WebSockets, SPA router paths, relative route tables extracted from the bundle, and the list of backend hosts |
+| **Technologies and versions** | frameworks, libraries, bundlers, CMS, server and CDN — via headers, cookies, banners, filenames and `?ver=`; enumerates **WordPress plugins and themes with their versions** |
+| **Third-party services** | analytics, payments, identity, monitoring, CDNs, support |
+| **Client-side vulnerabilities** | DOM XSS sinks (with taint detection), open redirect, disabled TLS, permissive CORS, credentials in `localStorage`, `Math.random()` for security values, internal hosts, staging environments |
+| **Exposure** | published source maps, Next.js `serverRuntimeConfig`, environment variables in `__NEXT_DATA__`, versions in headers, sensitive paths (`/.env`, `/.git/config`, `/actuator/env`…) |
+| **Headers** | CSP (and its quality), HSTS, X-Frame-Options, dangerous CORS, cookies missing `HttpOnly`/`Secure`/`SameSite` |
 
-## Cómo evita los falsos positivos
+## Sample output
 
-Esta es la parte que más importa. Un scanner que reporta de más no se lee.
+```
+───────────────────────────────── SCAN SUMMARY ─────────────────────────────────
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ Target      https://example.com/                                             │
+│ Duration    4.3s   ·   41 request(s)   ·   2098 KB scanned                   │
+│ Findings    2 CRITICAL  1 HIGH  4 MEDIUM  6 LOW  2 INFO                      │
+│ 3 low-confidence finding(s) hidden — rerun with --include-tentative          │
+╰──────────────────────────────────────────────────────────────────────────────╯
 
-1. **Las regex de código solo corren sobre código.** En un HTML el scanner extrae
-   el contenido de `<script>`, los manejadores inline y las URIs `javascript:`.
-   El texto de la página nunca llega a los detectores, así que
-   *"Seleccione un plan de nuestro catálogo"* jamás se reporta como SQL.
-2. **El SQL se busca dentro de string literals**, usando un tokenizador de JS que
-   además ignora comentarios. Un `SELECT` tiene que tener una tabla con nombre de
-   identificador válido (no `our`, `the`, `nuestro`), una cláusula que lo respalde
-   (`WHERE`, `JOIN`, `VALUES`, un parámetro `$1`/`?`) y no contener markup.
-3. **Los valores se validan, no solo se reconocen.** Un JWT se decodifica de
-   verdad; si no es JSON válido con claims, no es un JWT. Un valor genérico
-   necesita entropía y longitud reales.
-4. **Lista de placeholders.** `credentials:"same-origin"`, `api_key:"apikey"`,
-   `password:"password"`, `${API_KEY}`, `****`, `your-key-here` y compañía se
-   descartan. Si el valor es igual al nombre de la clave, se descarta.
-5. **Contexto de ARIA y de framework.** `role="button"` es ARIA, no un rol de
-   aplicación. `window.next` no es un open redirect. `navigator.language` no es un
-   host `.lan`.
-6. **Cada hallazgo lleva confianza** (`CONFIRMED` / `FIRM` / `TENTATIVE`). Por
-   defecto solo se muestran los dos primeros; `--include-tentative` muestra el resto.
+[+] TECHNOLOGIES & VERSIONS
+ Name          Version    Category   Evidence
+ ──────────────────────────────────────────────────
+ Next.js       14.1.0     framework  package manifest
+ React         18.2.0     framework  React.version
+ nginx         1.18.0     server     Server header
 
-## Instalación
+[!] SECRETS & CREDENTIALS
+ Sev        Conf   Issue                Value            Where
+ ────────────────────────────────────────────────────────────────────────
+ CRITICAL   Conf   AWS Access Key ID    AKIAIOSFO…MPLE   …/app.js:3
+ CRITICAL   Conf   JSON Web Token       eyJhbG…YzAb      …/app.js:6
+  ▸ JSON Web Token (JWT) Token carries authorization claims: role.
+    The token holds a privileged role. The token is still valid.
+    fix: Never ship tokens in the bundle; obtain them at runtime.
+
+[!] VULNERABILITIES & BAD PRACTICES
+ HIGH       Firm   SQL injection: query built by concatenation in the front-end
+```
+
+## How it avoids false positives
+
+This is the part that matters most. A scanner that over-reports does not get read.
+
+1. **Code regexes only run over code.** In an HTML document the scanner extracts
+   the contents of `<script>`, inline handlers and `javascript:` URIs. Page copy
+   never reaches the detectors, so *"Select a plan from our catalogue"* can never
+   be reported as SQL.
+2. **Secrets and SQL are read from string literals**, using a JS tokenizer that
+   also skips comments. A raw regex can pair the opening quote of one string with
+   the closing quote of another and capture a slab of minified code; a tokenizer
+   reading from the start of the file cannot.
+3. **SQL must be structurally real.** A `SELECT` needs a table that is a valid
+   identifier (not `our`, `the`, `nuestro`), a supporting clause (`WHERE`,
+   `JOIN`, `VALUES`, a `$1`/`?` parameter) and no markup.
+4. **Values are validated, not just matched.** A JWT is actually decoded; if it
+   is not valid JSON with claims, it is not a JWT. A generic value needs real
+   entropy and length.
+5. **Placeholders, prose and routes are rejected.** `credentials:"same-origin"`,
+   `api_key:"apikey"`, `${API_KEY}`, `****`, `your-key-here` are dropped. So are
+   human sentences — including accented ones, so an i18n message like
+   *"La contraseña es obligatoria"* is not key material — and route constants
+   like `user/change_password`, which are collected as endpoints instead.
+6. **Framework and ARIA context is respected.** `role="button"` is ARIA, not an
+   application role. `window.next` is not an open redirect. `navigator.language`
+   is not a `.lan` host. Third-party `Server:` headers do not describe your stack.
+7. **Every finding carries a confidence** (`CONFIRMED` / `FIRM` / `TENTATIVE`).
+   Only the first two are shown by default; `--include-tentative` shows the rest.
+
+## Installation
 
 ```bash
 git clone https://github.com/AlenMartinez/scan-blunder-front.git
@@ -59,85 +99,112 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-## Uso
+## Usage
 
 ```bash
-python3 main.py ejemplo.com
+python3 main.py example.com
 ```
 
-El esquema es opcional: si no se indica se intenta `https://` y se cae a `http://`
-automáticamente.
+The scheme is optional: if omitted, `https://` is tried first and it falls back
+to `http://` automatically.
 
-### Ejemplos
+### Examples
 
 ```bash
-# escaneo estándar, 20 hilos
-python3 main.py https://ejemplo.com --threads 20
+# standard scan, 20 threads
+python3 main.py https://example.com --threads 20
 
-# recorrer también 1 nivel de páginas internas
-python3 main.py https://ejemplo.com --depth 1
+# also crawl one level of internal pages
+python3 main.py https://example.com --depth 1
 
-# mostrar también los hallazgos de baja confianza
-python3 main.py https://ejemplo.com --include-tentative
+# show low-confidence findings as well
+python3 main.py https://example.com --include-tentative
 
-# solo secretos y SQL, sin tocar rutas sensibles
-python3 main.py https://ejemplo.com --only secrets,sql --no-probe
+# secrets and SQL only, without touching sensitive paths
+python3 main.py https://example.com --only secrets,sql --no-probe
 
-# pasar sesión autenticada y salir con código 2 si hay algo HIGH o peor
-python3 main.py https://ejemplo.com -H "Cookie: session=abc" --fail-on HIGH
+# pass an authenticated session and exit 2 if anything HIGH or worse is found
+python3 main.py https://example.com -H "Cookie: session=abc" --fail-on HIGH
 
-# a través de Burp / mitmproxy
-python3 main.py https://ejemplo.com --proxy http://127.0.0.1:8080 --insecure
+# through Burp / mitmproxy
+python3 main.py https://example.com --proxy http://127.0.0.1:8080 --insecure
 ```
 
-### Opciones principales
+### Main options
 
-| Opción | Descripción |
+| Option | Description |
 |---|---|
-| `--threads N` | peticiones concurrentes (10) |
-| `--depth N` | además, recorre N niveles de páginas del mismo sitio (0) |
-| `--max-assets N` | tope de archivos descargados (300) |
-| `--max-size MB` | tope por archivo (5) |
-| `--no-sourcemaps` | no descargar `.map` |
-| `--no-probe` | no pedir rutas sensibles conocidas |
-| `--only` / `--skip` | elegir detectores: `technology,secrets,sql,xss,misc,access,endpoints,headers` |
-| `--timeout` / `--delay` | timeout por petición y pausa mínima entre peticiones |
-| `--proxy` / `--insecure` | proxy HTTP y desactivar verificación TLS |
-| `-H 'Name: value'` | header extra (repetible) |
-| `--output DIR` | carpeta de informes (`findings`) |
-| `--format` | `json`, `md`, `txt` (por defecto `json,md`) |
-| `--include-tentative` | mostrar hallazgos de baja confianza |
-| `--min-severity` | ocultar por debajo de esa severidad |
-| `--fail-on SEVERITY` | salir con código 2 si hay hallazgos a ese nivel (para CI) |
-| `-v` / `-q` | verbose / silencioso |
+| `--threads N` | concurrent requests (10) |
+| `--depth N` | also crawl N levels of same-site pages (0) |
+| `--max-assets N` | cap on files downloaded (300) |
+| `--max-size MB` | per-file cap (5) |
+| `--no-sourcemaps` | do not download `.map` files |
+| `--no-probe` | do not request well-known sensitive paths |
+| `--only` / `--skip` | pick detectors: `technology,secrets,sql,xss,misc,access,endpoints,headers` |
+| `--timeout` / `--delay` | per-request timeout and minimum delay between requests |
+| `--proxy` / `--insecure` | HTTP proxy and disabling TLS verification |
+| `-H 'Name: value'` | extra request header (repeatable) |
+| `--output DIR` | report directory (`findings`) |
+| `--format` | `json`, `md`, `txt` (default `json,md`) |
+| `--include-tentative` | show low-confidence findings |
+| `--min-severity` | hide findings below that severity |
+| `--fail-on SEVERITY` | exit with code 2 if findings reach that level (for CI) |
+| `-v` / `-q` | verbose / quiet |
 
-### Informes
+### Reports
 
-Cada escaneo escribe en `findings/`:
+Every scan writes to `findings/`:
 
-- `dominio_fecha.json` — resultado completo, pensado para automatizar.
-- `dominio_fecha.md` — informe legible con detalle, ubicación y remediación.
-- `dominio_fecha.txt` — con `--format txt`.
+- `domain_date.json` — full result, meant for automation.
+- `domain_date.md` — readable report with detail, location and remediation.
+- `domain_date.txt` — with `--format txt`.
 
-## Arquitectura
+### Exit codes
+
+| Code | Meaning |
+|---|---|
+| `0` | scan completed; nothing at or above `--fail-on` |
+| `1` | bad arguments, or the target could not be reached |
+| `2` | `--fail-on` threshold was met — useful as a CI gate |
+
+## Architecture
 
 ```
 scanner/
-├── cli/          argumentos, validación y presentación en terminal
+├── cli/          arguments, validation and terminal presentation
 ├── core/
-│   ├── models.py     Finding, Asset, ScanResults, regiones de código
-│   ├── lexer.py      tokenizador de JS (string literals y comentarios)
-│   ├── filters.py    entropía, placeholders, guardas de HTML/prosa, validadores
-│   ├── context.py    configuración del escaneo
-│   ├── engine.py     orquestación: crawl, chunks, source maps, probes
-│   ├── patterns/     catálogos: secrets, vulns, technologies, access, endpoints
-│   ├── detector/     un detector por área, todos con la misma interfaz
-│   └── findings/     escritura de informes (json / md / txt)
-└── services/     cliente HTTP con reintentos, tope de tamaño y extracción de enlaces
+│   ├── models.py     Finding, Asset, ScanResults, code regions
+│   ├── lexer.py      JS tokenizer (string literals and comments)
+│   ├── filters.py    entropy, placeholders, HTML/prose guards, validators
+│   ├── context.py    scan configuration
+│   ├── engine.py     orchestration: crawl, chunks, source maps, probes
+│   ├── patterns/     catalogues: secrets, vulns, technologies, access, endpoints
+│   ├── detector/     one detector per area, all sharing the same interface
+│   └── findings/     report writers (json / md / txt)
+└── services/     HTTP client with retries, size caps and link extraction
 ```
 
-Agregar una comprobación nueva es agregar una regla a `patterns/`, o una clase a
-`detector/` y registrarla en `DETECTOR_CLASSES`.
+### Adding a check
+
+Most checks are one entry in a pattern catalogue:
+
+```python
+# scanner/core/patterns/vulns.py
+VulnRule(
+    name="Hardcoded feature flag override",
+    pattern=re.compile(r"(?i)\bforceEnable\w*\s*[:=]\s*true"),
+    severity=Severity.LOW,
+    detail="A feature flag is forced on in the production bundle.",
+    remediation="Drive flags from configuration, not from shipped constants.",
+    tags=["config"],
+)
+```
+
+Something with its own logic becomes a detector class implementing
+`detect(asset) -> Iterable[Finding]`, registered in `DETECTOR_CLASSES`
+(`scanner/core/detector/detector_services.py`). Use `asset.code_regions()` rather
+than `asset.content` so HTML copy never reaches your regex, and
+`iter_string_literals()` when the value you want lives inside a string.
 
 ## Tests
 
@@ -145,15 +212,42 @@ Agregar una comprobación nueva es agregar una regla a `patterns/`, o una clase 
 python3 -m unittest discover -s tests -t .
 ```
 
-La suite incluye los falsos positivos concretos que versiones anteriores
-reportaron contra sitios reales; son tests de regresión y deben seguir pasando.
+`tests/test_false_positives.py` and `tests/test_real_reports.py` contain the
+specific false positives that earlier versions reported against production
+sites. They are regression tests and must keep passing.
 
-## Disclaimer
+**If you find a false positive, that is a bug.** Open an issue with the snippet
+that triggered it, or send a pull request adding it to those files alongside the
+filter that resolves it.
 
-Herramienta para auditoría de seguridad autorizada y fines educativos. El modo
-por defecto realiza peticiones activas (incluidas rutas como `/.env` o
-`/.git/config`); usá `--no-probe` para limitarte a lo que haría un navegador.
-No la uses contra sistemas sin permiso explícito del propietario.
+## Contributing
+
+Pull requests are welcome. A good one:
+
+- adds a test for the behaviour it changes;
+- keeps the full suite green (`python3 -m unittest discover -s tests -t .`);
+- for a new detection, includes both a true positive and the false positive it
+  must not produce;
+- explains *why* a filter exists in a comment, so nobody removes it later.
+
+## License
+
+Released under the [MIT License](LICENSE) — free and open source, for the
+community.
+
+The license also carries an explicit acceptable-use notice: **responsibility
+for running this software rests entirely with whoever runs it.** You choose the
+targets, you need the authorization, and you own the consequences. The authors
+provide the tool with no warranty and accept no liability for how it is used,
+nor for decisions made from its output.
+
+## Authorized use only
+
+The default mode makes active requests, including paths such as `/.env` and
+`/.git/config`. Use `--no-probe` to stay within what a browser would do.
+
+Scan only systems you own or have explicit written permission to test. See the
+[LICENSE](LICENSE) for the full acceptable-use and responsibility notice.
 
 ---
-Hecho para la comunidad de seguridad.
+Made for the security community.

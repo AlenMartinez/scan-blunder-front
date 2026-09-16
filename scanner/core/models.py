@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+import threading
 from dataclasses import dataclass, field
 from typing import Dict, Iterable, List, Optional, Tuple
 
@@ -303,47 +304,80 @@ class ScanResults:
     _endpoint_index: Dict[Tuple[str, str], Endpoint] = field(
         default_factory=dict, repr=False
     )
+    #: Detectors run on a thread pool; every shared mutation goes through this.
+    _lock: "threading.RLock" = field(default_factory=threading.RLock, repr=False)
 
     # -- mutation ----------------------------------------------------------- #
     def add_finding(self, finding: Optional[Finding]) -> None:
         if finding is None:
             return
-        existing = self._finding_index.get(finding.dedupe_key)
-        if existing is not None:
-            existing.merge(finding)
-            return
-        self._finding_index[finding.dedupe_key] = finding
-        self.findings.append(finding)
+        with self._lock:
+            existing = self._finding_index.get(finding.dedupe_key)
+            if existing is not None:
+                existing.merge(finding)
+                return
+            self._finding_index[finding.dedupe_key] = finding
+            self.findings.append(finding)
 
     def add_findings(self, findings: Iterable[Finding]) -> None:
         for finding in findings:
             self.add_finding(finding)
 
     def add_technology(self, tech: Optional[Technology]) -> None:
-        if tech is None:
+        """Record a technology, merging case variants of the same name.
+
+        A `Server: cloudflare` header and a `cf-ray` header describe one product;
+        listing them as "cloudflare" and "Cloudflare" is just noise.
+        """
+        if tech is None or not tech.name:
             return
-        current = self.technologies.get(tech.name)
-        if current is None:
-            self.technologies[tech.name] = tech
-            return
-        # Prefer the entry that actually carries a version.
-        if not current.version and tech.version:
-            current.version = tech.version
-            current.evidence = tech.evidence
-            current.source = tech.source
+        with self._lock:
+            existing_key = self._technology_key(tech.name)
+            if existing_key is None:
+                self.technologies[tech.name] = tech
+                return
+            current = self.technologies[existing_key]
+            # Prefer the entry that actually carries a version.
+            if not current.version and tech.version:
+                current.version = tech.version
+                current.evidence = tech.evidence
+                current.source = tech.source
+            # Prefer the better-capitalised spelling.
+            if tech.name != existing_key and tech.name[:1].isupper() and not existing_key[:1].isupper():
+                self.technologies.pop(existing_key)
+                current.name = tech.name
+                self.technologies[tech.name] = current
+
+    def _technology_key(self, name: str) -> Optional[str]:
+        lowered = name.lower()
+        for key in self.technologies:
+            if key.lower() == lowered:
+                return key
+        return None
 
     def add_service(self, service: Optional[Service]) -> None:
         if service is None:
             return
-        self.services.setdefault(service.name, service)
+        with self._lock:
+            self.services.setdefault(service.name, service)
 
     def add_endpoint(self, endpoint: Optional[Endpoint]) -> None:
         if endpoint is None:
             return
-        if endpoint.dedupe_key in self._endpoint_index:
-            return
-        self._endpoint_index[endpoint.dedupe_key] = endpoint
-        self.endpoints.append(endpoint)
+        with self._lock:
+            if endpoint.dedupe_key in self._endpoint_index:
+                return
+            self._endpoint_index[endpoint.dedupe_key] = endpoint
+            self.endpoints.append(endpoint)
+
+    def add_url(self, url: str, scope: str) -> None:
+        with self._lock:
+            self.urls.setdefault(url, scope)
+
+    def add_email(self, email: str) -> None:
+        with self._lock:
+            if len(self.emails) < 200:
+                self.emails.append(email)
 
     def collapse_inferred_endpoints(self) -> None:
         """Drop assumed-GET entries for URLs where a real verb was observed.

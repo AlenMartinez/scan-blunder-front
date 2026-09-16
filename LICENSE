@@ -1,0 +1,62 @@
+MIT License
+
+Copyright (c) 2026 Alen Martínez
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+--------------------------------------------------------------------------------
+
+ADDITIONAL NOTICE — ACCEPTABLE USE AND RESPONSIBILITY
+
+This notice does not restrict any right granted by the MIT License above. It
+states the intent of the authors and the responsibilities of anyone who runs
+this software.
+
+Scan Blunder Front is published as free and open source software for the
+security community. It is intended for authorized security assessment,
+defensive review of systems you own or operate, and education.
+
+1. RESPONSIBILITY RESTS ENTIRELY WITH THE OPERATOR. The person or organization
+   who runs this software is solely and fully responsible for how it is used,
+   for choosing the targets it is pointed at, and for every consequence that
+   follows. The authors and contributors neither control nor supervise any use
+   of this software.
+
+2. AUTHORIZATION IS REQUIRED. This software sends requests to systems you
+   specify, and in its default configuration those requests are active (for
+   example, it probes paths such as /.env and /.git/config). Scanning systems
+   without the explicit permission of their owner may be illegal in your
+   jurisdiction. Obtain written authorization before scanning anything that is
+   not yours.
+
+3. NO LIABILITY FOR MISUSE. The authors and contributors are not responsible
+   for any damage, disruption, data loss, service interruption, legal
+   consequence, or any other harm arising from the use or misuse of this
+   software, whether that use was intentional, negligent, or accidental. This
+   includes use against third-party systems, use in production environments,
+   and any action taken on the basis of its output.
+
+4. NO GUARANTEE OF CORRECTNESS. The results are produced by heuristics. The
+   software may report findings that are not real, and it may fail to report
+   real vulnerabilities. Its output is not a certification of security and must
+   not be relied upon as one. Verify every finding independently before acting
+   on it.
+
+By downloading, installing, running, modifying or distributing this software,
+you accept these terms.
