@@ -1,14 +1,36 @@
 [project]
-name = "scan-blunder-moder-front"
-version = "0.1.0"
-description = "Scanner library front-end"
+name = "scan-blunder-front"
+version = "0.2.0"
+description = "Front-end security scanner: secrets, client-side SQL, access control, endpoints and stack fingerprinting"
+readme = "README.md"
 requires-python = ">=3.8"
+license = { file = "LICENSE" }
+authors = [{ name = "Alen Martínez" }]
+keywords = [
+    "security", "scanner", "appsec", "frontend", "secrets-detection",
+    "sast", "reconnaissance", "nextjs", "react", "wordpress",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Information Technology",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Security",
+]
 
 dependencies = [
-    "requests==2.31.0",
-    "beautifulsoup4==4.12.3",
-    "rich",
+    "requests>=2.31.0",
+    "beautifulsoup4>=4.12.3",
+    "rich>=13.7.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/AlenMartinez/scan-blunder-front"
+Issues = "https://github.com/AlenMartinez/scan-blunder-front/issues"
+
+[project.scripts]
+scan-blunder-front = "scanner.cli.commands:main"
 
 [tool.setuptools.packages.find]
 include = ["scanner*"]
